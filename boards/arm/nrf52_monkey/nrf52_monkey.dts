@@ -1,0 +1,43 @@
+
+/dts-v1/;
+#include <nordic/nrf52832_qfaa.dtsi>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "Wavy Monkey";
+	compatible = "wavy,nrf52_monkey";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+
+	aliases {
+		watchdog-sys-workq = &wdt0;
+	};
+};
+
+&uicr {
+	nfct-pins-as-gpios;
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&adc {
+	status = "okay";
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0x8000>;
+		};
+	};
+};

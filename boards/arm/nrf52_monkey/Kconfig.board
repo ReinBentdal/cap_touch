@@ -1,0 +1,4 @@
+
+config BOARD_NRF52_MONKEY
+	bool "nRF52 DK NRF52832"
+	depends on SOC_NRF52832_QFAA

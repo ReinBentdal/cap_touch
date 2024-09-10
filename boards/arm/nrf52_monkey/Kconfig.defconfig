@@ -1,0 +1,3 @@
+
+config BT_CTLR
+	default BT

@@ -1,0 +1,3 @@
+target_sources(app PRIVATE
+    cap_touch_discharge.c
+)

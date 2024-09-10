@@ -1,0 +1,9 @@
+{
+    "nrf-connect.topdir": "${nrf-connect.sdk:2.5.3}",
+    "nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.5.3}",
+    "files.associations": {
+        "nrfx_saadc.h": "c",
+        "nrf52.h": "c",
+        "system_nrf52.h": "c"
+    }
+}
