@@ -4,6 +4,7 @@
     "files.associations": {
         "nrfx_saadc.h": "c",
         "nrf52.h": "c",
-        "system_nrf52.h": "c"
+        "system_nrf52.h": "c",
+        "hardware_spec.h": "c"
     }
 }
