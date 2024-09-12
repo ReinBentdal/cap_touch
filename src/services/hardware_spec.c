@@ -1,5 +1,7 @@
 #include "hardware_spec.h"
 
+#include <zephyr/devicetree.h>
+
 #include "nrf52.h"
 #include "nrf52_bitfields.h"
 #include <stddef.h>
@@ -22,14 +24,14 @@ static const struct hardware_spec _hw_dk = {
   .DIS_hw_rev_str = DIS_HW_DK,
   .pin_map = {0},
   .led_direction = 0,
-  .cap_touch_psel = SAADC_CH_PSELP_PSELP_AnalogInput1,
+  .cap_touch_psel = COMP_PSEL_PSEL_AnalogInput1,
 };
 
 static const struct hardware_spec _hw_wimky001 = {
   .DIS_hw_rev_str = DIS_HW_WIMKY001,
   .pin_map = {-4, -5, 5, 4, 6, 8, 7, 10, 9, 11, 17, 15, 13, 12, 20, 14, 16, 18, 19, 22, 21, 23, 24, -2, -10, -3, -1, 1, 0, 3, 2, -10},
   .led_direction = 0b00000000,
-  .cap_touch_psel = SAADC_CH_PSELP_PSELP_AnalogInput7,
+  .cap_touch_psel = COMP_PSEL_PSEL_AnalogInput7,
 };
 
 enum hardware_version hardware_version_get(void) {

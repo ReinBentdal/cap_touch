@@ -10,7 +10,7 @@
 /// 4. Wait for TH to trigger. When this happens, infer time it took either from RTC or zephyr.
 /// 5. Back to 2.
 
-#include "cap_touch_discharge.h"
+#include "cap_touch.h"
 
 #include <zephyr/kernel.h>
 #include "nrf.h"
@@ -26,15 +26,16 @@ LOG_MODULE_REGISTER(cap_touch_discharge, LOG_LEVEL_INF);
 // #define _REG_SET(value, type) ((value << type##_Pos) & type##_Msk)
 // NRF_COMP->REFSEL = _REG_SET(COMP_REFSEL_REFSEL_VDD, COMP_REFSEL_REFSEL);
 
+static void _cap_event(struct k_work* work);
+K_WORK_DEFINE(_cap_touch_work, _cap_event);
+
 static void _comparator_configure(void);
 
-void cap_touch_discharge_init(void) {
+void cap_touch_init(void) {
     LOG_INF("cap_touch_init");
 
     const struct hardware_spec* hw_spec = hardware_spec_get();
     RETURN_ON_ERR_MSG(hw_spec->cap_touch_psel == SAADC_CH_PSELP_PSELP_NC, "no cap touch analog pin");
-
-    const struct device* port = common_port;
 
     uint32_t cap_pin = hardware_spec_pin_get(HARDWARE_SPEC_PIN_CAPTOUCH);
     RETURN_ON_ERR_MSG(cap_pin < 0, "no cap touch pin");
@@ -42,18 +43,8 @@ void cap_touch_discharge_init(void) {
     _comparator_configure();
 }
 
-void cap_touch_discharge_init(void) {
-    LOG_INF("cap_touch_discharge_init");
-
-    const struct hardware_spec* hw_spec = hardware_spec_get();
-    RETURN_ON_ERR_MSG(hw_spec->cap_touch_psel == SAADC_CH_PSELP_PSELP_NC, "no cap touch analog pin");
-
-    const struct device* port = common_port;
-
-    uint32_t cap_pin = hardware_spec_pin_get(HARDWARE_SPEC_PIN_CAPTOUCH);
-    RETURN_ON_ERR_MSG(cap_pin < 0, "no cap touch pin");
-
-    _comparator_configure();
+void cap_touch_start(void) {
+    NRF_COMP->TASKS_START = 1;
 }
 
 static void _comparator_configure(void) {
@@ -77,8 +68,14 @@ static void _comparator_configure(void) {
     NVIC_SetPriority(COMP_LPCOMP_IRQn, 3);
 }
 
-void COMP_Handler(void) {
+void COMP_LPCOMP_IRQHandler(void) {
     LOG_INF("COMP_Handler");
-    // stop COMP
-    NRF_COMP->ENABLE = 0;
+    if (NRF_COMP->EVENTS_DOWN) {
+        NRF_COMP->EVENTS_DOWN = 0;
+        k_work_submit(&_cap_touch_work);
+    }
+}
+
+static void _cap_event(struct k_work* work) {
+    LOG_INF("_cap_event");
 }

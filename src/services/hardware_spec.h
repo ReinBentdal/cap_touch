@@ -3,8 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <zephyr/devicetree.h>
-#include <zephyr/drivers/gpio.h>
+#include <zephyr/device.h>
 
 /* positive values are the keys and negative are others */
 #define HARDWARE_SPEC_PIN_UNUSED (-10)
