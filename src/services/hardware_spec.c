@@ -8,32 +8,22 @@ const struct device* common_port = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 
 // values stored in UICR
 #define HARDWARE_VERSION_WIMKY001_VALUE (0x80000001)
-#define HARDWARE_VERSION_REV2_VALUE (0xFFFFFFFF)
+#define HARDWARE_VERSION_DK_VALUE (0xFFFFFFFF)
 
 #ifdef DEBUG
-#define DIS_HW_UNKNOWN "unknown [DEBUG]"
-#define DIS_HW_REV2 "dev rev2 [DEBUG]"
+#define DIS_HW_DK "dev kit [DEBUG]"
 #define DIS_HW_WIMKY001 "WIMKY001 [DEBUG]"
 #else
-#define DIS_HW_UNKNOWN "unknown"
-#define DIS_HW_REV2 "dev rev2"
+#define DIS_HW_DK "dev kit"
 #define DIS_HW_WIMKY001 "WIMKY001"
 #endif
 
-static const struct hardware_spec _hw_unknown = {
-  .DIS_hw_rev_str = DIS_HW_UNKNOWN,
+static const struct hardware_spec _hw_dk = {
+  .DIS_hw_rev_str = DIS_HW_DK,
   .pin_map = {0},
   .led_direction = 0,
-  .cap_touch_psel = SAADC_CH_PSELP_PSELP_NC,
+  .cap_touch_psel = SAADC_CH_PSELP_PSELP_AnalogInput1,
 };
-
-static const struct hardware_spec _hw_rev2 = {
-  .DIS_hw_rev_str = DIS_HW_REV2,
-  .pin_map = {5, 6, 7, 8, 9, 10, 11, -4, 20, 17, 15, 13, 12, 14, 16, 18, 19, 21, 23, 22, 24, -10, -10, -10, -10, -3, -1, 0, 1, 2, 3, 4},
-  .led_direction = 0b00000011,
-  .cap_touch_psel = SAADC_CH_PSELP_PSELP_NC,
-};
-
 
 static const struct hardware_spec _hw_wimky001 = {
   .DIS_hw_rev_str = DIS_HW_WIMKY001,
@@ -46,21 +36,17 @@ enum hardware_version hardware_version_get(void) {
   const uint32_t hardware_version_value = NRF_UICR->CUSTOMER[0];
   if (hardware_version_value == HARDWARE_VERSION_WIMKY001_VALUE) {
     return HARDWARE_VERSION_WIMKY001;
-  } else if (hardware_version_value == HARDWARE_VERSION_REV2_VALUE) {
-    return HARDWARE_VERSION_REV2;
   }
 
-  return HARDWARE_VERSION_UNKNOWN;
+  return HARDWARE_VERSION_DK;
 }
 
 const struct hardware_spec* hardware_spec_get(void) {
   switch (hardware_version_get()) {
     case HARDWARE_VERSION_WIMKY001:
       return &_hw_wimky001;
-    case HARDWARE_VERSION_REV2:
-      return &_hw_rev2;
     default:
-      return &_hw_unknown;
+      return &_hw_dk;
     }
 }
 

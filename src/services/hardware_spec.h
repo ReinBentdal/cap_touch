@@ -16,9 +16,8 @@
 #define HARDWARE_SPEC_PIN_CAPTOUCH (-6)
 
 enum hardware_version {
-    HARDWARE_VERSION_UNKNOWN = 0,
-    HARDWARE_VERSION_REV2 = 1,
-    HARDWARE_VERSION_WIMKY001 = 2,
+    HARDWARE_VERSION_DK = 0,
+    HARDWARE_VERSION_WIMKY001 = 1,
 };
 
 struct hardware_spec {
