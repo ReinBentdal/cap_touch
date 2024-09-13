@@ -19,8 +19,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(cap_touch_oscillate, LOG_LEVEL_INF);
 
-#define Vref_mV (3000) // in reality it varies, but the exact value should not be too important
-#define _COMP_TH_CALC(mV) ((64*mV/Vref_mV) -1 )
+#define _COMP_TH_CALC(mV, Vref_mV) ((64*(mV)/(Vref_mV)) -1)
 
 static void _cap_event(struct k_work* work);
 K_WORK_DEFINE(_cap_touch_work, _cap_event);
@@ -66,19 +65,21 @@ void cap_touch_start(void) {
 
 static void _configure_comparator(int psel) {
     // set voltage reference to VDD
-    NRF_COMP->REFSEL = COMP_REFSEL_REFSEL_VDD << COMP_REFSEL_REFSEL_Pos;
+    NRF_COMP->REFSEL = COMP_REFSEL_REFSEL_Int2V4 << COMP_REFSEL_REFSEL_Pos;
+    static const int Vref = 2400;
+    static const int offset = 50;
 
     // set TH for up and down
-    const int th_low = _COMP_TH_CALC(100);
-    const int th_high = _COMP_TH_CALC(2900);
+    const int th_low = _COMP_TH_CALC(offset, Vref);
+    const int th_high = _COMP_TH_CALC(Vref-offset, Vref);
     LOG_INF("th_low: %d, th_high: %d", th_low, th_high);
     NRF_COMP->TH = (th_high << COMP_TH_THUP_Pos) | (th_low << COMP_TH_THDOWN_Pos);
 
     // set MODE, single ended and low power
-    NRF_COMP->MODE = (COMP_MODE_MAIN_SE << COMP_MODE_MAIN_Pos) | (COMP_MODE_SP_High << COMP_MODE_SP_Pos);
+    NRF_COMP->MODE = (COMP_MODE_MAIN_SE << COMP_MODE_MAIN_Pos) | (COMP_MODE_SP_Low << COMP_MODE_SP_Pos);
 
     // enable current source
-    NRF_COMP->ISOURCE = COMP_ISOURCE_ISOURCE_Ien10mA << COMP_ISOURCE_ISOURCE_Pos;
+    NRF_COMP->ISOURCE = COMP_ISOURCE_ISOURCE_Ien2mA5 << COMP_ISOURCE_ISOURCE_Pos;
 
     // set pin
     NRF_COMP->PSEL = psel;
@@ -92,29 +93,19 @@ static void _configure_counter(void) {
     NRF_TIMER0->BITMODE = TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos;
 
     NRF_TIMER0->TASKS_CLEAR = 1;
-
-    // use compare to trigger a cap touch press event. The RTC should normally reset the timer before this happens
-    // NRF_TIMER0->CC[0] = 0xFFFF;
-    // NRF_TIMER0->INTENSET = TIMER_INTENSET_COMPARE0_Enabled << TIMER_INTENSET_COMPARE0_Pos;
 }
 
-// use RTC to trigger counter reset on CC using PPI
 static void _configure_rtc(void) {
-    // alternatively, if its a problem clearing the counter at the same time as capture, use CC0 and CC1 just after each other to do them in sequence
-
-    // some generic values for now
     NRF_RTC0->PRESCALER = 327; // f = 100Hz
-
     NRF_RTC0->EVTENSET = RTC_EVTEN_TICK_Enabled << RTC_EVTEN_TICK_Pos;
-    NRF_RTC0->INTENSET = RTC_INTENSET_TICK_Enabled<< RTC_INTENSET_TICK_Pos; // configure interrupt to log value
 
-    IRQ_CONNECT(RTC0_IRQn, 3, _rtc_isr, 0, 0);
-    irq_enable(RTC0_IRQn);
+    // interrupt to log value
+    // NRF_RTC0->INTENSET = RTC_INTENSET_TICK_Enabled<< RTC_INTENSET_TICK_Pos; // configure interrupt to log value
+    // IRQ_CONNECT(RTC0_IRQn, 3, _rtc_isr, 0, 0);
+    // irq_enable(RTC0_IRQn);
 }
 
 static void _configure_ppi(void) {
-    // its possible to add them all to a group to be able to enable and disable them all at once using task
-
     // connect COMP to TIMER0: count
     NRF_PPI->CH[_counter_count_ppi_idx].EEP = (uint32_t)&NRF_COMP->EVENTS_DOWN;
     NRF_PPI->CH[_counter_count_ppi_idx].TEP = (uint32_t)&NRF_TIMER0->TASKS_COUNT;
@@ -127,6 +118,7 @@ static void _configure_ppi(void) {
     NRF_PPI->CHENSET = 1 << _counter_capture_ppi_idx;
 
     // connect RTC to TIMER0: reset timer counter
+    // TODO: change to FORK
     NRF_PPI->CH[_counter_clear_ppi_idx].EEP = (uint32_t)&NRF_RTC0->EVENTS_TICK;
     NRF_PPI->CH[_counter_clear_ppi_idx].TEP = (uint32_t)&NRF_TIMER0->TASKS_CLEAR;
     NRF_PPI->CHENSET = 1 << _counter_clear_ppi_idx;
