@@ -1,5 +1,4 @@
-#ifndef _HARDWARE_SPEC_H_
-#define _HARDWARE_SPEC_H_
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -32,5 +31,3 @@ enum hardware_version hardware_version_get(void);
 const struct hardware_spec* hardware_spec_get(void);
 
 int hardware_spec_pin_get(int pin_identifer);
-
-#endif

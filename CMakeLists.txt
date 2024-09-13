@@ -9,4 +9,5 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 target_sources(app PRIVATE src/main.c)
 
 add_subdirectory(src/services)
+add_subdirectory(src/utils)
 add_subdirectory(src/cap_touch)

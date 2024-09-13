@@ -1,19 +1,11 @@
 /// This module implementes cap touch using ISOURCE to create an oscillation.
-///
-/// 
-
-// verify:
-// 1. cap oscillating, comp trigger & ISOURCE switch
-// 2. counter counting, reset on RTC. Print count val
-// 3. Config values for press detection
-
 #include "cap_touch.h"
 
 #include <zephyr/kernel.h>
 #include "nrf.h"
 
 #include "services/hardware_spec.h"
-#include "services/ppi_index.h"
+#include "utils/ppi_connect.h"
 #include "utils/macros_common.h"
 
 #include <zephyr/logging/log.h>
@@ -31,19 +23,11 @@ static void _configure_ppi(void);
 
 static void _rtc_isr(void);
 
-static int _counter_count_ppi_idx;
-static int _counter_clear_ppi_idx;
-static int _counter_capture_ppi_idx;
-
 void cap_touch_init(void) {
     LOG_INF("cap_touch_init");
 
     const struct hardware_spec* hw_spec = hardware_spec_get();
     RETURN_ON_ERR_MSG(hw_spec->cap_touch_psel == SAADC_CH_PSELP_PSELP_NC, "no cap touch analog pin");
-
-    _counter_count_ppi_idx = ppi_index_get();
-    _counter_clear_ppi_idx = ppi_index_get();
-    _counter_capture_ppi_idx = ppi_index_get();
 
     _configure_comparator(hw_spec->cap_touch_psel);
     _configure_counter();
@@ -100,28 +84,18 @@ static void _configure_rtc(void) {
     NRF_RTC0->EVTENSET = RTC_EVTEN_TICK_Enabled << RTC_EVTEN_TICK_Pos;
 
     // interrupt to log value
-    // NRF_RTC0->INTENSET = RTC_INTENSET_TICK_Enabled<< RTC_INTENSET_TICK_Pos; // configure interrupt to log value
-    // IRQ_CONNECT(RTC0_IRQn, 3, _rtc_isr, 0, 0);
-    // irq_enable(RTC0_IRQn);
+    NRF_RTC0->INTENSET = RTC_INTENSET_TICK_Enabled<< RTC_INTENSET_TICK_Pos; // configure interrupt to log value
+    IRQ_CONNECT(RTC0_IRQn, 3, _rtc_isr, 0, 0);
+    irq_enable(RTC0_IRQn);
 }
 
 static void _configure_ppi(void) {
     // connect COMP to TIMER0: count
-    NRF_PPI->CH[_counter_count_ppi_idx].EEP = (uint32_t)&NRF_COMP->EVENTS_DOWN;
-    NRF_PPI->CH[_counter_count_ppi_idx].TEP = (uint32_t)&NRF_TIMER0->TASKS_COUNT;
-    NRF_PPI->CHENSET = 1 << _counter_count_ppi_idx;
+    (void)ppi_connect((uint32_t)&NRF_COMP->EVENTS_DOWN, (uint32_t)&NRF_TIMER0->TASKS_COUNT);
 
-    // connect COMP to TIMER0: capture timer counter
-    // used by interrupt to log the counter value
-    NRF_PPI->CH[_counter_capture_ppi_idx].EEP = (uint32_t)&NRF_RTC0->EVENTS_TICK;
-    NRF_PPI->CH[_counter_capture_ppi_idx].TEP = (uint32_t)&NRF_TIMER0->TASKS_CAPTURE[1];
-    NRF_PPI->CHENSET = 1 << _counter_capture_ppi_idx;
-
-    // connect RTC to TIMER0: reset timer counter
-    // TODO: change to FORK
-    NRF_PPI->CH[_counter_clear_ppi_idx].EEP = (uint32_t)&NRF_RTC0->EVENTS_TICK;
-    NRF_PPI->CH[_counter_clear_ppi_idx].TEP = (uint32_t)&NRF_TIMER0->TASKS_CLEAR;
-    NRF_PPI->CHENSET = 1 << _counter_clear_ppi_idx;
+    // connect COMP to TIMER0: capture timer counter. used by interrupt to log the counter value
+    const unsigned int ppi_idx = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_TICK, (uint32_t)&NRF_TIMER0->TASKS_CAPTURE[1]);
+    ppi_fork(ppi_idx, (uint32_t)&NRF_TIMER0->TASKS_CLEAR);
 }
 
 static void _cap_event(struct k_work* work) {
