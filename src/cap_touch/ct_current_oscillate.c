@@ -49,8 +49,8 @@ void cap_touch_start(void) {
 
 static void _configure_comparator(int psel) {
     // set voltage reference to VDD
-    NRF_COMP->REFSEL = COMP_REFSEL_REFSEL_Int2V4 << COMP_REFSEL_REFSEL_Pos;
-    static const int Vref = 2400;
+    NRF_COMP->REFSEL = COMP_REFSEL_REFSEL_Int1V2 << COMP_REFSEL_REFSEL_Pos;
+    static const int Vref = 1200;
     static const int offset = 50;
 
     // set TH for up and down
@@ -79,8 +79,9 @@ static void _configure_counter(void) {
     NRF_TIMER0->TASKS_CLEAR = 1;
 }
 
+#define RTC_PRESCALAR_HZ(val) (32768/val); BUILD_ASSERT((32768/val) <= 4096, "RTC prescalar must be less than 4096")
 static void _configure_rtc(void) {
-    NRF_RTC0->PRESCALER = 327; // f = 100Hz
+    NRF_RTC0->PRESCALER = RTC_PRESCALAR_HZ(10);
     NRF_RTC0->EVTENSET = RTC_EVTEN_TICK_Enabled << RTC_EVTEN_TICK_Pos;
 
     // interrupt to log value
@@ -91,7 +92,7 @@ static void _configure_rtc(void) {
 
 static void _configure_ppi(void) {
     // connect COMP to TIMER0: count
-    (void)ppi_connect((uint32_t)&NRF_COMP->EVENTS_DOWN, (uint32_t)&NRF_TIMER0->TASKS_COUNT);
+    (void)ppi_connect((uint32_t)&NRF_COMP->EVENTS_CROSS, (uint32_t)&NRF_TIMER0->TASKS_COUNT);
 
     // connect COMP to TIMER0: capture timer counter. used by interrupt to log the counter value
     const unsigned int ppi_idx = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_TICK, (uint32_t)&NRF_TIMER0->TASKS_CAPTURE[1]);
@@ -105,7 +106,6 @@ static void _cap_event(struct k_work* work) {
 static void _rtc_isr(void) {
     if (NRF_RTC0->EVENTS_TICK) {
         NRF_RTC0->EVENTS_TICK = 0;
-        // LOG_INF("Counter read: %d", NRF_TIMER0->CC[1]);
         printk("%d\n", NRF_TIMER0->CC[1]);
     }
 }

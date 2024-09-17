@@ -1,0 +1,16 @@
+source "Kconfig.zephyr"
+
+choice CAP_TOUCH_METHOD
+    bool "Foo choice"
+    default CAP_TOUCH_COMP_CURRENT
+
+config CAP_TOUCH_COMP_CURRENT
+    bool "A"
+
+config CAP_TOUCH_COMP_RC
+    bool "B"
+
+config CAP_TOUCH_GPIO_RC
+    bool "C"
+
+endchoice

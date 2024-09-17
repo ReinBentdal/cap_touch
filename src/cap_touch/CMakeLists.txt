@@ -1,4 +1,7 @@
-target_sources(app PRIVATE
-    ct_current_oscillate.c
-    # ct_rc_oscillate.c
-)
+if (CONFIG_CAP_TOUCH_COMP_CURRENT)
+    target_sources(app PRIVATE ct_current_oscillate.c)
+elseif (CONFIG_CAP_TOUCH_COMP_RC)
+    target_sources(app PRIVATE ct_rc_comp_oscillate.c)
+elseif (CONFIG_CAP_TOUCH_GPIO_RC)
+    target_sources(app PRIVATE ct_rc_gpio_oscillate.c)
+endif()

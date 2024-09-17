@@ -22,7 +22,7 @@ const struct device* common_port = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 
 static const struct hardware_spec _hw_dk = {
   .DIS_hw_rev_str = DIS_HW_DK,
-  .pin_map = {0},
+  .pin_map = {-10, -10, -10, -6},
   .led_direction = 0,
   .cap_touch_psel = COMP_PSEL_PSEL_AnalogInput1,
 };
