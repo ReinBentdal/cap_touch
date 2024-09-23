@@ -11,6 +11,8 @@
 LOG_MODULE_REGISTER(cap_touch, LOG_LEVEL_DBG);
 
 static volatile int16_t _sample_result;
+static int _pin;
+static int _psel;
 
 static void _rtc_isr(void);
 static void _adc_isr(void);
@@ -24,6 +26,8 @@ void cap_touch_init(void) {
     RETURN_ON_ERR_MSG(hw_spec->cap_touch_psel == SAADC_CH_PSELP_PSELP_NC, "no cap touch analog pin");
     adc_psel += 1; // COMP psel value is one less than ADC pin value
 
+    _pin = adc_pin;
+    _psel = adc_psel;
 
     NRF_SAADC->RESOLUTION = SAADC_RESOLUTION_VAL_10bit;
     static const uint32_t RESOLUTION = 1024;
@@ -31,7 +35,7 @@ void cap_touch_init(void) {
     NRF_SAADC->OVERSAMPLE = SAADC_OVERSAMPLE_OVERSAMPLE_Bypass;
 
     /* set pin */
-    NRF_SAADC->CH[0].PSELP = adc_psel;
+    NRF_SAADC->CH[0].PSELP = SAADC_CH_PSELN_PSELN_NC;
 
     /*
     * GPIO charges pin to VDD. Sampled voltage is a scalor of VDD, and we must therefore use VDD reference
@@ -71,12 +75,11 @@ void cap_touch_init(void) {
         | (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos)
         ;
 
-     NRF_GPIOTE->CONFIG[0] = 
-        (GPIOTE_CONFIG_MODE_Task << GPIOTE_CONFIG_MODE_Pos)
-        | ((adc_pin) << GPIOTE_CONFIG_PSEL_Pos)
-        | (GPIOTE_CONFIG_OUTINIT_High << GPIOTE_CONFIG_OUTINIT_Pos)
-        ;
-
+    //  NRF_GPIOTE->CONFIG[0] = 
+    //     (GPIOTE_CONFIG_MODE_Task << GPIOTE_CONFIG_MODE_Pos)
+    //     | ((adc_pin) << GPIOTE_CONFIG_PSEL_Pos)
+    //     | (GPIOTE_CONFIG_OUTINIT_High << GPIOTE_CONFIG_OUTINIT_Pos)
+    //     ;
 
     /* Set up RTC with CC0 and CC1 */
     NRF_RTC0->PRESCALER = 25; // use prescalar to set operating frequency, default 5
@@ -95,11 +98,12 @@ void cap_touch_init(void) {
 #endif
 
     /* connect peripherals together */
-    const unsigned int sample_ppi = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[0], (uint32_t)&NRF_GPIOTE->TASKS_CLR[0]);
-    ppi_fork(sample_ppi, (uint32_t)&NRF_SAADC->TASKS_SAMPLE);
+    // const unsigned int sample_ppi = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[0], (uint32_t)&NRF_GPIOTE->TASKS_CLR[0]);
+    // ppi_fork(sample_ppi, (uint32_t)&NRF_SAADC->TASKS_SAMPLE);
 
-    const unsigned int reset_ppi = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_GPIOTE->TASKS_SET[0]);
-    ppi_fork(reset_ppi, (uint32_t)&NRF_RTC0->TASKS_CLEAR);
+    // const unsigned int reset_ppi = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_GPIOTE->TASKS_SET[0]);
+    // ppi_fork(reset_ppi, (uint32_t)&NRF_RTC0->TASKS_CLEAR);
+    ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_RTC0->TASKS_CLEAR);
 
     LOG_DBG("cap_touch_init done");
 }
@@ -125,11 +129,18 @@ static void _adc_isr(void) {
 static void _rtc_isr(void) {
     if (NRF_RTC0->EVENTS_COMPARE[0]) {
         NRF_RTC0->EVENTS_COMPARE[0] = 0;
-       printk("RTC adc start\n");
+        printk("RTC adc start\n");
+        NRF_GPIO->OUTCLR = 1 << _pin;
+        NRF_SAADC->CH[0].PSELP = _psel;
+        NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Enabled;
+        NRF_SAADC->TASKS_SAMPLE = 1;
     }
 
     if (NRF_RTC0->EVENTS_COMPARE[1]) {
         NRF_RTC0->EVENTS_COMPARE[1] = 0;
-       printk("RTC gpio charge\n");
+        printk("RTC gpio charge\n");
+        NRF_SAADC->CH[0].PSELP = SAADC_CH_PSELN_PSELN_NC;
+        NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Disabled;
+        NRF_GPIO->OUTSET = 1 << _pin;
     }
 }
