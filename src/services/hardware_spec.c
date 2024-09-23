@@ -29,7 +29,7 @@ static const struct hardware_spec _hw_dk = {
 
 static const struct hardware_spec _hw_wimky001 = {
   .DIS_hw_rev_str = DIS_HW_WIMKY001,
-  .pin_map = {-4, -5, 5, 4, 6, 8, 7, 10, 9, 11, 17, 15, 13, 12, 20, 14, 16, 18, 19, 22, 21, 23, 24, -2, -10, -3, -1, 1, 0, 3, 2, -10},
+  .pin_map = {-4, -5, 5, 4, 6, 8, 7, 10, 9, 11, 17, 15, 13, 12, 20, 14, 16, 18, 19, 22, 21, 23, 24, -2, -10, -3, -1, 1, 0, 3, 2, -6}, // remember to transfer to midi_monkey FW
   .led_direction = 0b00000000,
   .cap_touch_psel = COMP_PSEL_PSEL_AnalogInput7,
 };

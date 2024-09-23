@@ -13,4 +13,6 @@ config CAP_TOUCH_COMP_RC
 config CAP_TOUCH_GPIO_RC
     bool "C"
 
+config CAP_TOUCH_ADC_CHARGE_SHARE
+    bool "D"
 endchoice

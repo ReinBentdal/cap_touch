@@ -57,7 +57,7 @@ static void _configure_comparator(int psel) {
 
     // set MODE, single ended and low power
     NRF_COMP->MODE = (COMP_MODE_MAIN_SE << COMP_MODE_MAIN_Pos) | (COMP_MODE_SP_Low << COMP_MODE_SP_Pos);
-    NRF_COMP->ISOURCE = COMP_ISOURCE_ISOURCE_Ien2mA5 << COMP_ISOURCE_ISOURCE_Pos;
+    NRF_COMP->ISOURCE = COMP_ISOURCE_ISOURCE_Ien10mA << COMP_ISOURCE_ISOURCE_Pos;
 
     NRF_COMP->PSEL = psel;
     NRF_COMP->ENABLE = COMP_ENABLE_ENABLE_Enabled << COMP_ENABLE_ENABLE_Pos;
@@ -66,25 +66,26 @@ static void _configure_comparator(int psel) {
 static void _configure_counter(void) {
     COUNT_TIMER->MODE = TIMER_MODE_MODE_Counter << TIMER_MODE_MODE_Pos;
     COUNT_TIMER->BITMODE = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;  // TODO: reduce bitmode when known max count
-    COUNT_TIMER->CC[0] = 20; // rough value to detect touch
+    COUNT_TIMER->CC[0] = 10; // rough value to detect touch
 }
 
 #define RTC_PRESCALAR_HZ(val) (32768/val); BUILD_ASSERT((32768/val) <= 4096, "RTC prescalar must be less than 4096")
 static void _configure_rtc(void) {
-    NRF_RTC0->PRESCALER = 10; // use prescalar to set operating frequency
-    NRF_RTC0->CC[0] = 1; // PWM off
-    NRF_RTC0->CC[1] = 100; // PWM on
+    NRF_RTC0->PRESCALER = 5; // use prescalar to set operating frequency
+    NRF_RTC0->CC[0] = 1; // PWM off, results in on time of 5/32768 = 150µs.
+    NRF_RTC0->CC[1] = 800; // PWM on, total period of 800*5/32768 = 122ms
     NRF_RTC0->EVTENSET = RTC_EVTEN_COMPARE0_Enabled << RTC_EVTEN_COMPARE0_Pos
         | RTC_EVTEN_COMPARE1_Enabled << RTC_EVTEN_COMPARE1_Pos
         ;
 
+#ifdef CONFIG_DEBUG
     // interrupt to log value
-    // NRF_RTC0->INTENSET = RTC_INTENSET_TICK_Enabled<< RTC_INTENSET_TICK_Pos 
-    //     | RTC_INTENSET_COMPARE0_Enabled << RTC_INTENSET_COMPARE0_Pos
-    //     | RTC_INTENSET_COMPARE1_Enabled << RTC_INTENSET_COMPARE1_Pos
-    //     ; // configure interrupt to log value
-    // IRQ_CONNECT(RTC0_IRQn, 3, _rtc_isr, 0, 0);
-    // irq_enable(RTC0_IRQn);
+    NRF_RTC0->INTENSET = RTC_INTENSET_TICK_Enabled<< RTC_INTENSET_TICK_Pos 
+        | RTC_INTENSET_COMPARE0_Enabled << RTC_INTENSET_COMPARE0_Pos
+        ; // configure interrupt to log value
+    IRQ_CONNECT(RTC0_IRQn, 3, _rtc_isr, 0, 0);
+    irq_enable(RTC0_IRQn);
+#endif
 }
 
 static void _configure_egu(void) {
@@ -101,27 +102,31 @@ static void _configure_ppi(void) {
     // connect Timer CC to group disable
     (void)ppi_connect((uint32_t)&COUNT_TIMER->EVENTS_COMPARE[0], (uint32_t)&NRF_PPI->TASKS_CHG[CHG_IDX].DIS);
 
-    // connect RTC compares
-    (void)ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[0], (uint32_t)&NRF_COMP->TASKS_STOP);
+    // PWM OFF
+    const unsigned int ppi_owm_off = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[0], (uint32_t)&NRF_COMP->TASKS_STOP);
+
     const unsigned int ppi_pwm_off1 = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[0], (uint32_t)&COUNT_TIMER->TASKS_CAPTURE[1]);
     ppi_fork(ppi_pwm_off1, (uint32_t)&COUNT_TIMER->TASKS_CLEAR);
 
     const unsigned int ppi_pwm_egu = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[0], (uint32_t)&NRF_EGU0->TASKS_TRIGGER[0]);
     NRF_PPI->CHG[CHG_IDX] = 1 << ppi_pwm_egu;
 
+    // PWM ON
     const unsigned int ppi_pwm_on = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_COMP->TASKS_START);
     ppi_fork(ppi_pwm_on, (uint32_t)&NRF_RTC0->TASKS_CLEAR);
-    (void)ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_PPI->TASKS_CHG[CHG_IDX].EN);
+    const unsigned int ppi_pwm_on1 = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_PPI->TASKS_CHG[CHG_IDX].EN);
+    
+    // disabling TIMER makes absolutely no difference in power consumption
+    // ppi_fork(ppi_owm_off, (uint32_t)&COUNT_TIMER->TASKS_STOP);
+    // ppi_fork(ppi_pwm_on1, (uint32_t)&COUNT_TIMER->TASKS_START);
+    ARG_UNUSED(ppi_owm_off);
+    ARG_UNUSED(ppi_pwm_on1);
 }
 
 static void _rtc_isr(void) {
     if (NRF_RTC0->EVENTS_COMPARE[0]) {
         NRF_RTC0->EVENTS_COMPARE[0] = 0;
-       printk("PWM off\n");
-    }
-    if (NRF_RTC0->EVENTS_COMPARE[1]) {
-        NRF_RTC0->EVENTS_COMPARE[1] = 0;
-        printk("PWM on\n");
+       printk("PWM off, capture %d\n", COUNT_TIMER->CC[1]);
     }
 }
 
