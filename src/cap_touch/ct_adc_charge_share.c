@@ -121,7 +121,7 @@ static void _adc_isr(void) {
         printk("result: %d\n", _sample_result);
     }
 }
-
+ 
 static void _rtc_isr(void) {
     if (NRF_RTC0->EVENTS_COMPARE[0]) {
         NRF_RTC0->EVENTS_COMPARE[0] = 0;
