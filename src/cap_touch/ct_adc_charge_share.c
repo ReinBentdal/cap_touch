@@ -10,7 +10,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(cap_touch, LOG_LEVEL_DBG);
 
-static volatile int16_t _sample_result;
+static volatile int16_t _sample;
 static int _pin;
 static int _psel;
 
@@ -26,6 +26,8 @@ void cap_touch_init(void) {
     RETURN_ON_ERR_MSG(hw_spec->cap_touch_psel == SAADC_CH_PSELP_PSELP_NC, "no cap touch analog pin");
     adc_psel += 1; // COMP psel value is one less than ADC pin value
 
+    LOG_INF("cap touch pin select: %d, psel: %d", adc_pin, adc_psel);
+ 
     _pin = adc_pin;
     _psel = adc_psel;
 
@@ -34,8 +36,8 @@ void cap_touch_init(void) {
 
     NRF_SAADC->OVERSAMPLE = SAADC_OVERSAMPLE_OVERSAMPLE_Bypass;
 
-    /* set pin */
-    NRF_SAADC->CH[0].PSELP = SAADC_CH_PSELN_PSELN_NC;
+    /* set pin, dummy */
+    NRF_SAADC->CH[0].PSELP = 0xFE;
 
     /*
     * GPIO charges pin to VDD. Sampled voltage is a scalor of VDD, and we must therefore use VDD reference
@@ -44,16 +46,16 @@ void cap_touch_init(void) {
     NRF_SAADC->CH[0].CONFIG = (SAADC_CH_CONFIG_RESP_Bypass << SAADC_CH_CONFIG_RESP_Pos) |
                               (SAADC_CH_CONFIG_GAIN_Gain1_4 << SAADC_CH_CONFIG_GAIN_Pos) |
                               (SAADC_CH_CONFIG_REFSEL_VDD1_4 << SAADC_CH_CONFIG_REFSEL_Pos) |
-                              (SAADC_CH_CONFIG_TACQ_3us << SAADC_CH_CONFIG_TACQ_Pos) |
+                              (SAADC_CH_CONFIG_TACQ_10us << SAADC_CH_CONFIG_TACQ_Pos) |
                               (SAADC_CH_CONFIG_MODE_SE << SAADC_CH_CONFIG_MODE_Pos);
 
     NRF_SAADC->CH[0].LIMIT = ((RESOLUTION / 2) << SAADC_CH_LIMIT_HIGH_Pos) & SAADC_CH_LIMIT_HIGH_Msk;
 
     /* Enable interrupt on threshold */
-    NRF_SAADC->INTENSET = SAADC_INTENSET_CH0LIMITH_Msk | SAADC_INTENSET_RESULTDONE_Msk;
+    NRF_SAADC->INTENSET = SAADC_INTENSET_CH0LIMITH_Msk | SAADC_INTENSET_END_Msk;
 
     NRF_SAADC->RESULT.MAXCNT = 1;
-    NRF_SAADC->RESULT.PTR = (uint32_t)&_sample_result;
+    NRF_SAADC->RESULT.PTR = (uint32_t)&_sample;
 
     NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Enabled;
 
@@ -69,9 +71,10 @@ void cap_touch_init(void) {
 
     /* gpio task to set pin to 1 or Z */
     NRF_GPIO->PIN_CNF[adc_pin] = 
-        (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos)
+        (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos)
         | (GPIO_PIN_CNF_PULL_Disabled << GPIO_PIN_CNF_PULL_Pos)
         | (GPIO_PIN_CNF_DRIVE_D0S1 << GPIO_PIN_CNF_DRIVE_Pos)
+        | (GPIO_PIN_CNF_INPUT_Disconnect << GPIO_PIN_CNF_INPUT_Pos)
         | (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos)
         ;
 
@@ -82,7 +85,7 @@ void cap_touch_init(void) {
     //     ;
 
     /* Set up RTC with CC0 and CC1 */
-    NRF_RTC0->PRESCALER = 25; // use prescalar to set operating frequency, default 5
+    NRF_RTC0->PRESCALER = 50; // use prescalar to set operating frequency, default 5
     NRF_RTC0->CC[0] = 1; // PWM off, results in on time of 5/32768 = 150µs.
     NRF_RTC0->CC[1] = 800; // PWM on, total period of 800*5/32768 = 122ms
     NRF_RTC0->EVTENSET = RTC_EVTEN_COMPARE0_Enabled << RTC_EVTEN_COMPARE0_Pos
@@ -105,6 +108,8 @@ void cap_touch_init(void) {
     // ppi_fork(reset_ppi, (uint32_t)&NRF_RTC0->TASKS_CLEAR);
     ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_RTC0->TASKS_CLEAR);
 
+    ppi_connect((uint32_t)&NRF_SAADC->EVENTS_STARTED, (uint32_t)&NRF_SAADC->TASKS_SAMPLE);
+
     LOG_DBG("cap_touch_init done");
 }
 
@@ -116,13 +121,14 @@ void cap_touch_start(void) {
 static void _adc_isr(void) {
     if (NRF_SAADC->EVENTS_CH[0].LIMITH) {
         NRF_SAADC->EVENTS_CH[0].LIMITH = 0;
-        printk("LIMITH: %d\n", _sample_result);
+        printk("LIMITH: %d\n", _sample);
     }
 
-    if (NRF_SAADC->EVENTS_RESULTDONE) {
-        NRF_SAADC->EVENTS_RESULTDONE = 0;
-
-        printk("result: %d\n", _sample_result);
+    if (NRF_SAADC->EVENTS_END) {
+        NRF_SAADC->EVENTS_END = 0;
+        NRF_SAADC->TASKS_STOP = 1;
+        printk("END: %d\n", _sample);
+        // MIGHT USE HIDDEN REGRESULT register to access result diretly
     }
 }
  
@@ -130,17 +136,20 @@ static void _rtc_isr(void) {
     if (NRF_RTC0->EVENTS_COMPARE[0]) {
         NRF_RTC0->EVENTS_COMPARE[0] = 0;
         printk("RTC adc start\n");
-        NRF_GPIO->OUTCLR = 1 << _pin;
-        NRF_SAADC->CH[0].PSELP = _psel;
-        NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Enabled;
-        NRF_SAADC->TASKS_SAMPLE = 1;
+        // NRF_GPIO->OUTCLR = 1 << _pin;
+        NRF_SAADC->TASKS_START = 1;
     }
 
     if (NRF_RTC0->EVENTS_COMPARE[1]) {
         NRF_RTC0->EVENTS_COMPARE[1] = 0;
         printk("RTC gpio charge\n");
-        NRF_SAADC->CH[0].PSELP = SAADC_CH_PSELN_PSELN_NC;
-        NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Disabled;
-        NRF_GPIO->OUTSET = 1 << _pin;
+        // NRF_GPIO->OUTSET = 1 << _pin;
+
+        static uint32_t psel = 0;
+        NRF_GPIO->PIN_CNF[_pin] &= ~(1 << (18 + psel)); // remove old ANA pin
+        psel = (psel + 1) % (32-18);
+        NRF_GPIO->PIN_CNF[_pin] |= (1 << (18 + psel)); // set new ANA pin
+
+        printk("new psel: %d\n", psel);
     }
 }
