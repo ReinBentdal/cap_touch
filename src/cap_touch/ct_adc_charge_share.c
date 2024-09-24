@@ -10,7 +10,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(cap_touch, LOG_LEVEL_DBG);
 
-static volatile int16_t _sample;
+static volatile uint32_t _sample;
 static int _pin;
 static int _psel;
 
@@ -31,25 +31,28 @@ void cap_touch_init(void) {
     _pin = adc_pin;
     _psel = adc_psel;
 
-    NRF_SAADC->RESOLUTION = SAADC_RESOLUTION_VAL_10bit;
-    static const uint32_t RESOLUTION = 1024;
+    NRF_SAADC->RESOLUTION = SAADC_RESOLUTION_VAL_14bit;
+    static const uint32_t RESOLUTION = 16384;
 
     NRF_SAADC->OVERSAMPLE = SAADC_OVERSAMPLE_OVERSAMPLE_Bypass;
 
-    /* set pin, dummy */
-    NRF_SAADC->CH[0].PSELP = 0xFE;
+    /* set pin */
+    NRF_SAADC->CH[0].PSELP = adc_psel;
 
     /*
     * GPIO charges pin to VDD. Sampled voltage is a scalor of VDD, and we must therefore use VDD reference
     * For now we have unity gain (ref & gain together)
     */
-    NRF_SAADC->CH[0].CONFIG = (SAADC_CH_CONFIG_RESP_Bypass << SAADC_CH_CONFIG_RESP_Pos) |
+   #define SAADC_CH_CONFIG_TACQ_1us 6
+   #define SAADC_CH_CONFIG_TACQ_2us 7
+    NRF_SAADC->CH[0].CONFIG = (SAADC_CH_CONFIG_RESP_Pullup << SAADC_CH_CONFIG_RESP_Pos) |
                               (SAADC_CH_CONFIG_GAIN_Gain1_4 << SAADC_CH_CONFIG_GAIN_Pos) |
                               (SAADC_CH_CONFIG_REFSEL_VDD1_4 << SAADC_CH_CONFIG_REFSEL_Pos) |
-                              (SAADC_CH_CONFIG_TACQ_10us << SAADC_CH_CONFIG_TACQ_Pos) |
-                              (SAADC_CH_CONFIG_MODE_SE << SAADC_CH_CONFIG_MODE_Pos);
+                              (SAADC_CH_CONFIG_TACQ_3us << SAADC_CH_CONFIG_TACQ_Pos) |
+                              (SAADC_CH_CONFIG_MODE_SE << SAADC_CH_CONFIG_MODE_Pos) |
+                              (SAADC_CH_CONFIG_BURST_Enabled << SAADC_CH_CONFIG_BURST_Pos);
 
-    NRF_SAADC->CH[0].LIMIT = ((RESOLUTION / 2) << SAADC_CH_LIMIT_HIGH_Pos) & SAADC_CH_LIMIT_HIGH_Msk;
+    NRF_SAADC->CH[0].LIMIT = ((RESOLUTION / 2) << SAADC_CH_LIMIT_LOW_Pos) & SAADC_CH_LIMIT_LOW_Msk;
 
     /* Enable interrupt on threshold */
     NRF_SAADC->INTENSET = SAADC_INTENSET_CH0LIMITH_Msk | SAADC_INTENSET_END_Msk;
@@ -70,13 +73,13 @@ void cap_touch_init(void) {
 
 
     /* gpio task to set pin to 1 or Z */
-    NRF_GPIO->PIN_CNF[adc_pin] = 
-        (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos)
-        | (GPIO_PIN_CNF_PULL_Disabled << GPIO_PIN_CNF_PULL_Pos)
-        | (GPIO_PIN_CNF_DRIVE_D0S1 << GPIO_PIN_CNF_DRIVE_Pos)
-        | (GPIO_PIN_CNF_INPUT_Disconnect << GPIO_PIN_CNF_INPUT_Pos)
-        | (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos)
-        ;
+    // NRF_GPIO->PIN_CNF[adc_pin] = 
+    //     (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos)
+    //     | (GPIO_PIN_CNF_PULL_Disabled << GPIO_PIN_CNF_PULL_Pos)
+    //     | (GPIO_PIN_CNF_DRIVE_D0S1 << GPIO_PIN_CNF_DRIVE_Pos)
+    //     | (GPIO_PIN_CNF_INPUT_Disconnect << GPIO_PIN_CNF_INPUT_Pos)
+    //     | (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos)
+    //     ;
 
     //  NRF_GPIOTE->CONFIG[0] = 
     //     (GPIOTE_CONFIG_MODE_Task << GPIOTE_CONFIG_MODE_Pos)
@@ -85,7 +88,7 @@ void cap_touch_init(void) {
     //     ;
 
     /* Set up RTC with CC0 and CC1 */
-    NRF_RTC0->PRESCALER = 50; // use prescalar to set operating frequency, default 5
+    NRF_RTC0->PRESCALER = 5; // use prescalar to set operating frequency, default 5
     NRF_RTC0->CC[0] = 1; // PWM off, results in on time of 5/32768 = 150µs.
     NRF_RTC0->CC[1] = 800; // PWM on, total period of 800*5/32768 = 122ms
     NRF_RTC0->EVTENSET = RTC_EVTEN_COMPARE0_Enabled << RTC_EVTEN_COMPARE0_Pos
@@ -135,21 +138,20 @@ static void _adc_isr(void) {
 static void _rtc_isr(void) {
     if (NRF_RTC0->EVENTS_COMPARE[0]) {
         NRF_RTC0->EVENTS_COMPARE[0] = 0;
-        printk("RTC adc start\n");
+        // printk("RTC adc start\n");
         // NRF_GPIO->OUTCLR = 1 << _pin;
         NRF_SAADC->TASKS_START = 1;
     }
 
     if (NRF_RTC0->EVENTS_COMPARE[1]) {
         NRF_RTC0->EVENTS_COMPARE[1] = 0;
-        printk("RTC gpio charge\n");
+        // printk("RTC gpio charge\n");
         // NRF_GPIO->OUTSET = 1 << _pin;
 
-        static uint32_t psel = 0;
-        NRF_GPIO->PIN_CNF[_pin] &= ~(1 << (18 + psel)); // remove old ANA pin
-        psel = (psel + 1) % (32-18);
-        NRF_GPIO->PIN_CNF[_pin] |= (1 << (18 + psel)); // set new ANA pin
-
-        printk("new psel: %d\n", psel);
+        // static uint32_t psel = 0;
+        // NRF_GPIO->PIN_CNF[_pin] &= ~(1 << (18 + psel)); // remove old ANA pin
+        // psel = (psel + 1) % (32-18);
+        // NRF_GPIO->PIN_CNF[_pin] |= (1 << (18 + psel)); // set new ANA pin
+        // printk("new psel: %d\n", psel);
     }
 }
