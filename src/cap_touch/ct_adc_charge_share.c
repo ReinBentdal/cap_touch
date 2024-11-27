@@ -43,19 +43,23 @@ void cap_touch_init(void) {
     * GPIO charges pin to VDD. Sampled voltage is a scalor of VDD, and we must therefore use VDD reference
     * For now we have unity gain (ref & gain together)
     */
-   #define SAADC_CH_CONFIG_TACQ_1us 6
-   #define SAADC_CH_CONFIG_TACQ_2us 7
-    NRF_SAADC->CH[0].CONFIG = (SAADC_CH_CONFIG_RESP_Pullup << SAADC_CH_CONFIG_RESP_Pos) |
+    #define SAADC_CH_CONFIG_TACQ_1us 6
+    #define SAADC_CH_CONFIG_TACQ_2us 7
+    NRF_SAADC->CH[0].CONFIG = (SAADC_CH_CONFIG_RESP_Bypass << SAADC_CH_CONFIG_RESP_Pos) |
                               (SAADC_CH_CONFIG_GAIN_Gain1_4 << SAADC_CH_CONFIG_GAIN_Pos) |
                               (SAADC_CH_CONFIG_REFSEL_VDD1_4 << SAADC_CH_CONFIG_REFSEL_Pos) |
                               (SAADC_CH_CONFIG_TACQ_3us << SAADC_CH_CONFIG_TACQ_Pos) |
-                              (SAADC_CH_CONFIG_MODE_SE << SAADC_CH_CONFIG_MODE_Pos) |
-                              (SAADC_CH_CONFIG_BURST_Enabled << SAADC_CH_CONFIG_BURST_Pos);
+                              (SAADC_CH_CONFIG_MODE_SE << SAADC_CH_CONFIG_MODE_Pos);
 
-    NRF_SAADC->CH[0].LIMIT = ((RESOLUTION / 2) << SAADC_CH_LIMIT_LOW_Pos) & SAADC_CH_LIMIT_LOW_Msk;
+    NRF_SAADC->CH[0].LIMIT = ((RESOLUTION / 2) << SAADC_CH_LIMIT_LOW_Pos) & SAADC_CH_LIMIT_LOW_Msk |
+                             SAADC_CH_LIMIT_HIGH_Msk;
 
     /* Enable interrupt on threshold */
-    NRF_SAADC->INTENSET = SAADC_INTENSET_CH0LIMITH_Msk | SAADC_INTENSET_END_Msk;
+    // NRF_SAADC->INTENSET = SAADC_INTENSET_CH0LIMITL_Msk;
+
+#if CONDIG_DEBUG
+    NRF_SAADC->INTENSET = SAADC_INTENSET_RESULTDONE_Msk;
+#endif
 
     NRF_SAADC->RESULT.MAXCNT = 1;
     NRF_SAADC->RESULT.PTR = (uint32_t)&_sample;
@@ -68,50 +72,15 @@ void cap_touch_init(void) {
     NRF_SAADC->EVENTS_CALIBRATEDONE = 0;
     while (NRF_SAADC->STATUS == (SAADC_STATUS_STATUS_Busy <<SAADC_STATUS_STATUS_Pos)) {}
 
-    IRQ_CONNECT(SAADC_IRQn, 3, _adc_isr, 0, 0);
-    irq_enable(SAADC_IRQn);
+    // IRQ_CONNECT(SAADC_IRQn, 3, _adc_isr, 0, 0);
+    // irq_enable(SAADC_IRQn);
 
 
-    /* gpio task to set pin to 1 or Z */
-    // NRF_GPIO->PIN_CNF[adc_pin] = 
-    //     (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos)
-    //     | (GPIO_PIN_CNF_PULL_Disabled << GPIO_PIN_CNF_PULL_Pos)
-    //     | (GPIO_PIN_CNF_DRIVE_D0S1 << GPIO_PIN_CNF_DRIVE_Pos)
-    //     | (GPIO_PIN_CNF_INPUT_Disconnect << GPIO_PIN_CNF_INPUT_Pos)
-    //     | (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos)
-    //     ;
-
-    //  NRF_GPIOTE->CONFIG[0] = 
-    //     (GPIOTE_CONFIG_MODE_Task << GPIOTE_CONFIG_MODE_Pos)
-    //     | ((adc_pin) << GPIOTE_CONFIG_PSEL_Pos)
-    //     | (GPIOTE_CONFIG_OUTINIT_High << GPIOTE_CONFIG_OUTINIT_Pos)
-    //     ;
-
-    /* Set up RTC with CC0 and CC1 */
-    NRF_RTC0->PRESCALER = 5; // use prescalar to set operating frequency, default 5
-    NRF_RTC0->CC[0] = 1; // PWM off, results in on time of 5/32768 = 150µs.
-    NRF_RTC0->CC[1] = 800; // PWM on, total period of 800*5/32768 = 122ms
-    NRF_RTC0->EVTENSET = RTC_EVTEN_COMPARE0_Enabled << RTC_EVTEN_COMPARE0_Pos
-        | RTC_EVTEN_COMPARE1_Enabled << RTC_EVTEN_COMPARE1_Pos
+    /* Set up RTC to trigger ADC */
+    NRF_RTC0->PRESCALER = 3276; // use prescalar to set operating frequency
+    NRF_RTC0->EVTENSET = RTC_EVTEN_TICK_Enabled << RTC_EVTEN_TICK_Pos;
         ;
-
-#ifdef CONFIG_DEBUG
-    // interrupt to log value
-    NRF_RTC0->INTENSET = RTC_INTENSET_COMPARE0_Msk | RTC_INTENSET_COMPARE1_Msk
-        ; // configure interrupt to log value
-    IRQ_CONNECT(RTC0_IRQn, 3, _rtc_isr, 0, 0);
-    irq_enable(RTC0_IRQn);
-#endif
-
-    /* connect peripherals together */
-    // const unsigned int sample_ppi = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[0], (uint32_t)&NRF_GPIOTE->TASKS_CLR[0]);
-    // ppi_fork(sample_ppi, (uint32_t)&NRF_SAADC->TASKS_SAMPLE);
-
-    // const unsigned int reset_ppi = ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_GPIOTE->TASKS_SET[0]);
-    // ppi_fork(reset_ppi, (uint32_t)&NRF_RTC0->TASKS_CLEAR);
-    ppi_connect((uint32_t)&NRF_RTC0->EVENTS_COMPARE[1], (uint32_t)&NRF_RTC0->TASKS_CLEAR);
-
-    ppi_connect((uint32_t)&NRF_SAADC->EVENTS_STARTED, (uint32_t)&NRF_SAADC->TASKS_SAMPLE);
+    ppi_connect((uint32_t)&NRF_RTC0->EVENTS_TICK, (uint32_t)&NRF_SAADC->TASKS_SAMPLE);
 
     LOG_DBG("cap_touch_init done");
 }
@@ -121,37 +90,20 @@ void cap_touch_start(void) {
     NRF_RTC0->TASKS_START = 1;
 }
 
-static void _adc_isr(void) {
-    if (NRF_SAADC->EVENTS_CH[0].LIMITH) {
-        NRF_SAADC->EVENTS_CH[0].LIMITH = 0;
-        printk("LIMITH: %d\n", _sample);
-    }
+// static void _adc_isr(void) {
+//     if (NRF_SAADC->EVENTS_CH[0].LIMITL) {
+//         NRF_SAADC->EVENTS_CH[0].LIMITL = 0;
+//         #define SAADC_RESULT_REG ((volatile uint32_t*)(NRF_SAADC_BASE + 0x5EC))
+//         const uint32_t regresult = *SAADC_RESULT_REG;
+//         printk("LIMIT result: %d\n", regresult);
+//     }
 
-    if (NRF_SAADC->EVENTS_END) {
-        NRF_SAADC->EVENTS_END = 0;
-        NRF_SAADC->TASKS_STOP = 1;
-        printk("END: %d\n", _sample);
-        // MIGHT USE HIDDEN REGRESULT register to access result diretly
-    }
-}
- 
-static void _rtc_isr(void) {
-    if (NRF_RTC0->EVENTS_COMPARE[0]) {
-        NRF_RTC0->EVENTS_COMPARE[0] = 0;
-        // printk("RTC adc start\n");
-        // NRF_GPIO->OUTCLR = 1 << _pin;
-        NRF_SAADC->TASKS_START = 1;
-    }
-
-    if (NRF_RTC0->EVENTS_COMPARE[1]) {
-        NRF_RTC0->EVENTS_COMPARE[1] = 0;
-        // printk("RTC gpio charge\n");
-        // NRF_GPIO->OUTSET = 1 << _pin;
-
-        // static uint32_t psel = 0;
-        // NRF_GPIO->PIN_CNF[_pin] &= ~(1 << (18 + psel)); // remove old ANA pin
-        // psel = (psel + 1) % (32-18);
-        // NRF_GPIO->PIN_CNF[_pin] |= (1 << (18 + psel)); // set new ANA pin
-        // printk("new psel: %d\n", psel);
-    }
-}
+// #if CONDIG_DEBUG
+//     if (NRF_SAADC->EVENTS_RESULTDONE) {
+//         NRF_SAADC->EVENTS_RESULTDONE = 0;
+//         #define SAADC_RESULT_REG ((volatile uint32_t*)(NRF_SAADC_BASE + 0x5EC))
+//         const uint32_t regresult = *SAADC_RESULT_REG;
+//         printk("result: %d\n", regresult);
+//     }
+// #endif
+// }

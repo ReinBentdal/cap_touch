@@ -7,6 +7,9 @@ static int _index_get(void);
 
 unsigned int ppi_connect(int eep, int tep) {
     const int ppi_index = _index_get();
+    __ASSERT(NRF_PPI->CHEN & (1 << ppi_index), "PPI channel %d already in use", ppi_index);
+    __ASSERT(NRF_PPI->CH[ppi_index].EEP == NULL, "PPI channel %d already in use", ppi_index);
+    __ASSERT(NRF_PPI->CH[ppi_index].TEP == NULL, "PPI channel %d already in use", ppi_index);
     NRF_PPI->CH[ppi_index].EEP = eep;
     NRF_PPI->CH[ppi_index].TEP = tep;
     NRF_PPI->CHENSET = 1 << ppi_index;
