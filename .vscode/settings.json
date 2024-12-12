@@ -6,6 +6,7 @@
         "nrf52.h": "c",
         "system_nrf52.h": "c",
         "hardware_spec.h": "c",
-        "nrf.h": "c"
+        "nrf.h": "c",
+        "compare": "c"
     }
 }

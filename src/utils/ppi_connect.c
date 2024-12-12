@@ -3,26 +3,48 @@
 #include <zephyr/kernel.h>
 #include "nrf.h"
 
-static int _index_get(void);
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(ppi_connect, LOG_LEVEL_INF);
 
-unsigned int ppi_connect(int eep, int tep) {
-    const int ppi_index = _index_get();
-    __ASSERT(NRF_PPI->CHEN & (1 << ppi_index), "PPI channel %d already in use", ppi_index);
-    __ASSERT(NRF_PPI->CH[ppi_index].EEP == NULL, "PPI channel %d already in use", ppi_index);
-    __ASSERT(NRF_PPI->CH[ppi_index].TEP == NULL, "PPI channel %d already in use", ppi_index);
-    NRF_PPI->CH[ppi_index].EEP = eep;
-    NRF_PPI->CH[ppi_index].TEP = tep;
+#define NUM_PPI_CHANNELS 20
+#define NUM_PPI_GROUPS 5
+
+uint32_t ppi_new_group_find(void) {
+    static uint8_t internal_used_groups = 0;
+    uint32_t index = 0;
+    
+    while (index < NUM_PPI_GROUPS) {
+        if ((NRF_PPI->CHG[index] == 0) && ((internal_used_groups & (1U << index)) == 0)) {
+            internal_used_groups |= (1U << index);
+            return index;
+        }
+        index++;
+    }
+    
+    __ASSERT(0, "No available PPI group");
+    return 0;
+}
+
+uint32_t ppi_connect(volatile uint32_t* eep, volatile uint32_t* tep) {
+    static uint32_t internal_used_channels = 0;
+    uint32_t ppi_index = 0;
+    while ((NRF_PPI->CHEN & (1U << ppi_index)) && ((internal_used_channels & (1U << ppi_index))) && (NRF_PPI->CH[ppi_index].EEP != (uint32_t)NULL || NRF_PPI->CH[ppi_index].TEP != (uint32_t)NULL)) {
+        ppi_index++;
+        __ASSERT(ppi_index < NUM_PPI_CHANNELS, "No available PPI channel");
+    }
+    internal_used_channels |= 1 << ppi_index;
+    LOG_DBG("Found channel %d", ppi_index);
+
+    // __ASSERT((NRF_PPI->CHEN & (1 << ppi_index) == 0), "PPI channel %d already in use", ppi_index);
+    __ASSERT((uint32_t*)NRF_PPI->CH[ppi_index].EEP == NULL, "PPI channel %d already in use", ppi_index);
+    __ASSERT((uint32_t*)NRF_PPI->CH[ppi_index].TEP == NULL, "PPI channel %d already in use", ppi_index);
+    NRF_PPI->CH[ppi_index].EEP = (uint32_t)eep;
+    NRF_PPI->CH[ppi_index].TEP = (uint32_t)tep;
     NRF_PPI->CHENSET = 1 << ppi_index;
     return ppi_index;
 }
 
-void ppi_fork(unsigned int idx, int tep) {
+void ppi_fork(uint32_t idx, volatile uint32_t* tep) {
     __ASSERT_NO_MSG(idx < ARRAY_SIZE(NRF_PPI->FORK));
-    NRF_PPI->FORK[idx].TEP = tep;
-}
-
-static int _index_get(void) {
-    static int ppi_index = 0;
-    __ASSERT(ppi_index < ARRAY_SIZE(NRF_PPI->CH), "PPI index out of bounds");
-    return ppi_index++;
+    NRF_PPI->FORK[idx].TEP = (uint32_t)tep;
 }

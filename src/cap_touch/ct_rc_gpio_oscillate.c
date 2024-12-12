@@ -4,7 +4,6 @@
 #include <zephyr/kernel.h>
 #include "nrf.h"
 
-#include "services/hardware_spec.h"
 #include "utils/ppi_connect.h"
 #include "utils/macros_common.h"
 
@@ -25,7 +24,9 @@ static void _configure_ppi(void);
 static void _rtc_isr(void);
 static void _gpio_isr(void);
 
-void cap_touch_init(void) {
+void cap_touch_init(cap_touch_event_t event_cb, uint32_t comp_psel) {
+    ARG_UNUSED(event_cb);
+    ARG_UNUSED(comp_psel);
     LOG_INF("cap_touch_init");
 
     const struct hardware_spec* hw_spec = hardware_spec_get();

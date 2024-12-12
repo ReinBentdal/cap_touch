@@ -16,10 +16,11 @@
 #include <zephyr/kernel.h>
 #include "nrf.h"
 
-#include "services/hardware_spec.h"
 #include "utils/ppi_connect.h"
 #include "utils/macros_common.h"
 #include "utils/sorted_index_get.h"
+
+#include "bluetooth/bt_log.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(cap_touch, LOG_LEVEL_DBG);
@@ -63,9 +64,9 @@ enum _state {
 
 /* operation parameters of _STATE_AUTONOMOUS_LOW_FREQUENCY and _STATE_HIGH_FREQUENCY state */
 #define RTC_TICKS_SAMPLE 4                          // current 10uA => 6 ticks, current 2u5 => 14 ticks
-#define RTC_TICKS_SAMPLE_HF 50                      // current 10uA => 40 ticks, current 2u5 => 100 ticks
+#define RTC_TICKS_SAMPLE_HF 500                      // current 10uA => 40 ticks, current 2u5 => 100 ticks
 #define RTC_TICKS_RESET_LOW_FREQUENCY 4000
-#define RTC_TICKS_RESET_HIGH_FREQUENCY 400
+#define RTC_TICKS_RESET_HIGH_FREQUENCY 4000
 
 static enum _state _state = _STATE_UNINITIALIZED;
 static struct _counter_region _counter_region;
@@ -106,19 +107,20 @@ static void _sample_process(struct k_work *work);
 static K_WORK_DEFINE(_sample_process_work, _sample_process);
 
 static cap_touch_event_t _cb;
-void cap_touch_init(cap_touch_event_t event_cb, uint32_t comp_psel) {
+void cap_touch_init(cap_touch_event_t event_cb, uint32_t psel_comp, uint32_t psel_pin) {
     __ASSERT_NO_MSG(_state == _STATE_UNINITIALIZED);
     __ASSERT_NO_MSG(event_cb != NULL);
+    ARG_UNUSED(psel_pin);
     LOG_INF("cap_touch_init");
 
-    if (comp_psel == -1) {
+    if (psel_comp == -1) {
         LOG_WRN("the board does not have cap touch");
         _set_state(_STATE_NOT_SUPPORTED);
         return;
     }
 
     _cb = event_cb;
-    NRF_COMP->PSEL = comp_psel;
+    NRF_COMP->PSEL = psel_comp;
 
     _set_state(_STATE_OFF);
 }
@@ -319,14 +321,14 @@ static void _calibration_capture(struct k_work *work) {
     _calibration_buf_idx = (_calibration_buf_idx + 1) % ARRAY_SIZE(_calibration_buf);
     const uint16_t calibration_filtered = sorted_index_get(_calibration_buf, ARRAY_SIZE(_calibration_buf), CALIBRATION_RANK);
 
-#if CONFIG_DEBUG
-    // print calibration points
-    printk("Calibrated to %d with period %d from points:", calibration_filtered, _calibration_period);
-    for (uint8_t i = 0; i < ARRAY_SIZE(_calibration_buf); i++) {
-        printk("%s%d", i == _calibration_buf_idx ? "|" : " ", _calibration_buf[i]);
-    }
-    printk("\n");
-#endif
+// #if CONFIG_DEBUG
+//     // print calibration points
+//     printk("Calibrated to %d with period %d from points:", calibration_filtered, _calibration_period);
+//     for (uint8_t i = 0; i < ARRAY_SIZE(_calibration_buf); i++) {
+//         printk("%s%d", i == _calibration_buf_idx ? "|" : " ", _calibration_buf[i]);
+//     }
+//     printk("\n");
+// #endif
 
     _counter_region_set(calibration_filtered);
 
@@ -374,8 +376,17 @@ static void _counter_region_set(uint32_t calibration_point) {
     COUNTER_SELECT->CC[COUNTER_CC_ACTIVE_TRIGGER] = _counter_region.activate;
 }
 
+struct _sample_store {
+    uint8_t sample;
+    uint8_t filtered;
+};
+
+// #define NUM_SAMPLES_STORE 16
+// uint32_t _sample_store_idx;
+// struct _sample_store _sample_store[NUM_SAMPLES_STORE];
+
 static void _sample_process(struct k_work *work) {
-    static uint8_t value_filtered = 0;
+    static uint16_t value_filtered = 0;
 
     uint16_t sample;
     while (k_msgq_get(&_samples_msgq, &sample, K_NO_WAIT) == 0) {
@@ -390,33 +401,47 @@ static void _sample_process(struct k_work *work) {
             return;
         }
 
+        /* filter value, 1. order low pass */
+        static const uint8_t scale_factor = _FIXED8_PERCENT(40);
+        value_filtered = (value_filtered*scale_factor + sample*(UINT8_MAX - scale_factor) + 128) >> 8;
+
         /* map value to something approximately proportional with capacitance, and range 0 to 127 */
         // TODO: precalculate constants
         static const int32_t a = _FIXED8_PERCENT(50);
         const int32_t A = _counter_region.nominal * RTC_TICKS_SAMPLE_HF * a / RTC_TICKS_SAMPLE >> 8;
         const int32_t Sp = _counter_region.activate * RTC_TICKS_SAMPLE_HF / RTC_TICKS_SAMPLE;
         const int32_t Sn = _counter_region.saturate * RTC_TICKS_SAMPLE_HF / RTC_TICKS_SAMPLE;
-        const int32_t sample_clamp = CLAMP(sample, (uint16_t)Sn, (uint16_t)Sp);
+        const int32_t sample_clamp = CLAMP(value_filtered, (uint16_t)Sn, (uint16_t)Sp);
 
         const int32_t denominator = (Sp - Sn)*(sample_clamp + A - Sn);
         if (denominator == 0) {
             LOG_WRN("denominator 0");
             continue;
         }
-        const int32_t value = 127*A*(Sp - sample_clamp)/denominator;
+        const int16_t value_transformed = 127*A*(Sp - sample_clamp)/denominator;
 
-        /* filter value, 1. order low pass */
-        static const uint8_t scale_factor = _FIXED8_PERCENT(40);
-        value_filtered = (value_filtered*scale_factor + value*(UINT8_MAX - scale_factor) + 128) >> 8;
+        uint16_t data[] = {sample, value_filtered, value_transformed};
 
-        LOG_INF("S: %d, S_c: %d, V: %d, V_o: %d [%d:%d:%d]", sample, sample_clamp, value, value_filtered, _counter_region.nominal, _counter_region.activate, _counter_region.saturate);
+        bt_log_notify((uint8_t*)data, sizeof(data));
+
+        // _sample_store[_sample_store_idx] = (struct _sample_store){sample, value_filtered};
+        // _sample_store_idx++;
+        // if (_sample_store_idx == NUM_SAMPLES_STORE) {
+        //     // send
+        //     for (int i = 0; i < NUM_SAMPLES_STORE; i++) {
+        //         LOG_INF("capd: %d-%d", _sample_store[i].sample, _sample_store[i].filtered);
+        //     }
+        //     _sample_store_idx = 0;
+        // }
+
+        // LOG_INF("S: %d, S_c: %d, V: %d, V_o: %d [%d:%d:%d]", sample, sample_clamp, value, value_filtered, _counter_region.nominal, _counter_region.activate, _counter_region.saturate);
     }
 
-    if (value_filtered == 0)
-        _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY);
+    // if (value_filtered == 0)
+    //     _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY);
 
-    static uint8_t output_prev = 0;
-    if (output_prev == value_filtered) return;
-    output_prev = value_filtered;
-    _cb(value_filtered);
+    // static uint8_t output_prev = 0;
+    // if (output_prev == value_filtered) return;
+    // output_prev = value_filtered;
+    // _cb(value_filtered);
 }
