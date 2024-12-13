@@ -6,6 +6,7 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/conn.h>
 
+#include "bt_log.h"
 #include "utils/macros_common.h"
 
 #include <zephyr/logging/log.h>
@@ -17,7 +18,7 @@ static const struct bt_data _ble_advertisement_data[] = {
 };
 
 static const struct bt_data _ble_scan_response_data[] = {
-    BT_DATA_BYTES(BT_DATA_UUID16_ALL, 0x12, 0x18), // HID UUID: 0x1812 in little-endian format
+    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_BLE_LOG_VAL), // HID UUID: 0x1812 in little-endian format
 };
 
 
@@ -61,8 +62,16 @@ int bt_connection_init(bt_state_change_cb bt_state_change_cb) {
 
 struct bt_conn* bt_connection_get(void) { return _ble_conn; }
 
+static void _bt_ready(int err) {
+	LOG_INF("Bluetooth ready cb");
+	if (err) {
+		LOG_ERR("Bluetooth init failed (err %d)", err);
+		return;
+	}
+	_advertisement_start();
+}
+
 static void _advertisement_start(void) {
-	if (_advertisement_params_fast == NULL) return;
 	int ret = bt_le_adv_start(_advertisement_params_fast, _ble_advertisement_data, ARRAY_SIZE(_ble_advertisement_data), _ble_scan_response_data, ARRAY_SIZE(_ble_scan_response_data));
   	LOG_ERR_IF(ret, "failed to start advertising");
 }
@@ -72,15 +81,6 @@ static void _connection_negotiate(void) {
 	LOG_INF("Sending connection parameters interval %d:%d, latency %d, timeout %d", _connection_params_fast.interval_min, _connection_params_fast.interval_max, _connection_params_fast.latency, _connection_params_fast.timeout);
 	int ret = bt_conn_le_param_update(_ble_conn, &_connection_params_fast);
 	LOG_WRN_IF(ret, "Connection parameter update failed (err %d)", ret);
-}
-
-static void _bt_ready(int err) {
-	LOG_INF("Bluetooth ready cb");
-	if (err) {
-		LOG_ERR("Bluetooth init failed (err %d)", err);
-		return;
-	}
-	_advertisement_start();
 }
 
 static void _ble_connected_cb(struct bt_conn* conn, uint8_t conn_err) {

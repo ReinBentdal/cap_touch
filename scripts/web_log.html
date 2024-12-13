@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Web Bluetooth Example</title>
+<style>
+  body {
+    font-family: sans-serif;
+    margin: 20px;
+  }
+  button {
+    margin-right: 10px;
+  }
+  #log {
+    white-space: pre-wrap;
+    border: 1px solid #ccc;
+    padding: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+<h1>Simple Web Bluetooth App</h1>
+<button id="connectButton">Connect</button>
+<button id="toggleNotificationsButton" disabled>Start Notifications</button>
+<button id="clearButton">Clear</button>
+<button id="markButton">Mark</button>
+
+<div id="log"></div>
+
+<script>
+  // UUIDs from your definition
+  const SERVICE_UUID = '03b80e5a-ffff-4b33-a751-6ce34ec4c700';
+  const CHARACTERISTIC_UUID = '03b80e5a-ffff-ffff-a751-6ce34ec4c700';
+
+  let device;
+  let characteristic;
+  let notificationsActive = false;
+
+  const logElement = document.getElementById('log');
+  const connectButton = document.getElementById('connectButton');
+  const toggleNotificationsButton = document.getElementById('toggleNotificationsButton');
+  const clearButton = document.getElementById('clearButton');
+  const markButton = document.getElementById('markButton');
+
+  function log(text) {
+    logElement.textContent += text + '\n';
+    logElement.scrollTop = logElement.scrollHeight;
+  }
+
+  connectButton.addEventListener('click', async () => {
+    try {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }]
+      });
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+      log('Connected to device: ' + device.name);
+      toggleNotificationsButton.disabled = false;
+    } catch (error) {
+      console.error(error);
+      log('Error: ' + error);
+    }
+  });
+
+  toggleNotificationsButton.addEventListener('click', async () => {
+    if (!characteristic) {
+      log('Not connected to a characteristic.');
+      return;
+    }
+    if (notificationsActive) {
+      // Stop notifications
+      await characteristic.stopNotifications();
+      characteristic.removeEventListener('characteristicvaluechanged', handleNotification);
+      toggleNotificationsButton.textContent = 'Start Notifications';
+      log('Notifications stopped.');
+      notificationsActive = false;
+    } else {
+      // Start notifications
+      await characteristic.startNotifications();
+      characteristic.addEventListener('characteristicvaluechanged', handleNotification);
+      toggleNotificationsButton.textContent = 'Stop Notifications';
+      log('Notifications started.');
+      notificationsActive = true;
+    }
+  });
+
+  function handleNotification(event) {
+    const value = event.target.value;
+    const bytes = [];
+    for (let i = 0; i < value.byteLength; i++) {
+      const byteValue = value.getUint8(i);
+      bytes.push(byteValue.toString(16).padStart(2, '0'));
+    }
+    // Join by space and log
+    log(bytes.join(' '));
+  }
+
+  clearButton.addEventListener('click', () => {
+    logElement.textContent = '';
+  });
+
+  let cnt = 0;
+  markButton.addEventListener('click', () => {
+    log(`--- ${cnt}`)
+    cnt++;
+  })
+</script>
+</body>
+</html>

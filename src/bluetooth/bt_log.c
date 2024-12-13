@@ -1,3 +1,5 @@
+#include "bt_log.h"
+
 #include <errno.h>
 
 #include <zephyr/bluetooth/conn.h>
@@ -10,16 +12,7 @@ LOG_MODULE_REGISTER(bt_log, 3);
 
 static void _ccc_cfg_changed_bt(const struct bt_gatt_attr* attr, uint16_t value);
 
-// custom UUID
-#define BT_UUID_BLE_LOG_VAL \
-    BT_UUID_128_ENCODE(0x03b80e5a, 0xffff, 0x4b33, 0xa751, 0x6ce34ec4c700)
-#define BT_UUID_BLE_LOG_SERVICE \
-    BT_UUID_DECLARE_128(BT_UUID_BLE_LOG_VAL)
 
-#define BT_UUID_BLE_LOG_IO_VAL \
-    BT_UUID_128_ENCODE(0x03b80e5a, 0xffff, 0xffff, 0xa751, 0x6ce34ec4c700)
-#define BT_UUID_BLE_LOG_CHARACTERISTIC \
-    BT_UUID_DECLARE_128(BT_UUID_BLE_LOG_IO_VAL)
 
 /* BLE MIDI Service Declaration */
 BT_GATT_SERVICE_DEFINE(_bt_log_service,
