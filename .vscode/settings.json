@@ -8,6 +8,7 @@
         "hardware_spec.h": "c",
         "nrf.h": "c",
         "compare": "c",
-        "bt_log.h": "c"
+        "bt_log.h": "c",
+        "ppi_connect.h": "c"
     }
 }

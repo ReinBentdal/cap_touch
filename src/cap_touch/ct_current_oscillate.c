@@ -1,3 +1,29 @@
+/*
+ * File: ct_current_oscillate.c
+ * Author: Rein Gundersen Bentdal
+ * Created: 19.Des 2024
+ *
+ * Copyright (c) 2024, Rein Gundersen Bentdal
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 /** This module implementes cap touch using COMP ISOURCE to create an oscillation. It only requires one pin.
  * The relative capacitance is measured by counting the number of oscillations (N) in a given time period, using a timer in counter mode. The count value is inversely proportional to the capacitance.
  * 
@@ -81,7 +107,7 @@ static uint32_t _ppi_calibration_hf_compare;
 #define _MSGQ_SIZE 4
 K_MSGQ_DEFINE(_samples_msgq, sizeof(uint16_t), _MSGQ_SIZE, sizeof(uint16_t));
 
-static void _set_state(enum _state new_state);
+static void _set_state(enum _state new_state, uint32_t from_bitfield);
 
 static void _configure_comparator(void);
 static void _configure_counter(void);
@@ -117,28 +143,33 @@ void cap_touch_init(cap_touch_event_t event_cb, uint32_t psel_comp, uint32_t pse
 
     if (psel_comp == -1) {
         LOG_WRN("the board does not have cap touch");
-        _set_state(_STATE_NOT_SUPPORTED);
+        _set_state(_STATE_NOT_SUPPORTED, ~0);
         return;
     }
 
     _cb = event_cb;
     NRF_COMP->PSEL = psel_comp;
 
-    _set_state(_STATE_OFF);
+    _set_state(_STATE_OFF, 1 << _STATE_UNINITIALIZED);
 }
 
 void cap_touch_start(void) {
     LOG_INF("cap_touch_start");
-    _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY);
+    _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY, (1 << _STATE_OFF));
 }
 
 void cap_touch_stop(void) {
     LOG_INF("cap_touch_stop");
-    _set_state(_STATE_OFF);
+    _set_state(_STATE_OFF, (1 << _STATE_AUTONOMOUS_LOW_FREQUENCY) || (1 << _STATE_HIGH_FREQUENCY));
 }
 
 /* state machine is implemented such that it's valid to call it at any time, but requires it to be called from only a single thread */
-static void _set_state(enum _state new_state) {
+static void _set_state(enum _state new_state, uint32_t from_bitfield) {
+    if (!((1 << _state) & from_bitfield)) {
+        LOG_WRN("Tried setting state with unsupported current state: %d, %d, %d", _state, new_state, from_bitfield);
+        return;
+    }
+    
     if (_state == new_state) {
         LOG_WRN("Already in state: %d", new_state);
         return;
@@ -389,7 +420,7 @@ static void _sample_process(struct k_work *work) {
         }
 
         if (_state == _STATE_AUTONOMOUS_LOW_FREQUENCY) {
-            _set_state(_STATE_HIGH_FREQUENCY);
+            _set_state(_STATE_HIGH_FREQUENCY, (1 << _STATE_AUTONOMOUS_LOW_FREQUENCY));
             k_msgq_purge(&_samples_msgq); // discard all samples, because they are scaled differently in the two modes
             return;
         }
@@ -422,10 +453,11 @@ static void _sample_process(struct k_work *work) {
 
     // keep in high power mode by uncommenting the rest of this
     if (value_transformed == 0)
-        _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY);
+        _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY, (1 << _STATE_HIGH_FREQUENCY));
 
     static uint8_t output_prev = 0;
     if (output_prev == value_transformed) return;
     output_prev = value_transformed;
+    LOG_DBG("out (comp): %d", value_transformed);
     _cb(value_transformed);
 }
