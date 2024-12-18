@@ -20,7 +20,9 @@
 #include "utils/macros_common.h"
 #include "utils/sorted_index_get.h"
 
+#if CONFIG_DEBUG
 #include "bluetooth/bt_log.h"
+#endif
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(cap_touch, LOG_LEVEL_DBG);
@@ -63,8 +65,8 @@ enum _state {
 #define COUNTER_CC_CALIBRATION_CAPTURE_HF 3
 
 /* operation parameters of _STATE_AUTONOMOUS_LOW_FREQUENCY and _STATE_HIGH_FREQUENCY state */
-#define RTC_TICKS_SAMPLE 4                          // current 10uA => 6 ticks, current 2u5 => 14 ticks
-#define RTC_TICKS_SAMPLE_HF 500                      // current 10uA => 40 ticks, current 2u5 => 100 ticks
+#define RTC_TICKS_SAMPLE 4
+#define RTC_TICKS_SAMPLE_HF 500
 #define RTC_TICKS_RESET_LOW_FREQUENCY 4000
 #define RTC_TICKS_RESET_HIGH_FREQUENCY 4000
 
@@ -321,14 +323,14 @@ static void _calibration_capture(struct k_work *work) {
     _calibration_buf_idx = (_calibration_buf_idx + 1) % ARRAY_SIZE(_calibration_buf);
     const uint16_t calibration_filtered = sorted_index_get(_calibration_buf, ARRAY_SIZE(_calibration_buf), CALIBRATION_RANK);
 
-// #if CONFIG_DEBUG
-//     // print calibration points
-//     printk("Calibrated to %d with period %d from points:", calibration_filtered, _calibration_period);
-//     for (uint8_t i = 0; i < ARRAY_SIZE(_calibration_buf); i++) {
-//         printk("%s%d", i == _calibration_buf_idx ? "|" : " ", _calibration_buf[i]);
-//     }
-//     printk("\n");
-// #endif
+#if CONFIG_DEBUG
+    // print calibration points
+    printk("Calibrated to %d with period %d from points:", calibration_filtered, _calibration_period);
+    for (uint8_t i = 0; i < ARRAY_SIZE(_calibration_buf); i++) {
+        printk("%s%d", i == _calibration_buf_idx ? "|" : " ", _calibration_buf[i]);
+    }
+    printk("\n");
+#endif
 
     _counter_region_set(calibration_filtered);
 
@@ -337,16 +339,6 @@ static void _calibration_capture(struct k_work *work) {
     if (_calibration_period > _CALIBRATION_SAMPLE_CAPTURE_PERIOD_MAX_SEC)
         _calibration_period = _CALIBRATION_SAMPLE_CAPTURE_PERIOD_MAX_SEC;
     k_work_schedule(&_calibration_capture_work, K_SECONDS(_calibration_period));
-}
-
-static void _egu_irq(void) {
-    if (EGU_SELECT->EVENTS_TRIGGERED[EGU_ACTIVATE_IDX]) {
-        EGU_SELECT->EVENTS_TRIGGERED[EGU_ACTIVATE_IDX] = 0;
-        volatile uint16_t sample = COUNTER_SELECT->CC[COUNTER_CC_SAMPLE_CAPTURE];
-        int ret = k_msgq_put(&_samples_msgq, (void*)&sample, K_NO_WAIT);
-        LOG_WRN_IF(ret, "msgq full");
-        (void)k_work_submit(&_sample_process_work);
-    }
 }
 
 static void _counter_region_set(uint32_t calibration_point) {
@@ -376,14 +368,15 @@ static void _counter_region_set(uint32_t calibration_point) {
     COUNTER_SELECT->CC[COUNTER_CC_ACTIVE_TRIGGER] = _counter_region.activate;
 }
 
-struct _sample_store {
-    uint8_t sample;
-    uint8_t filtered;
-};
-
-// #define NUM_SAMPLES_STORE 16
-// uint32_t _sample_store_idx;
-// struct _sample_store _sample_store[NUM_SAMPLES_STORE];
+static void _egu_irq(void) {
+    if (EGU_SELECT->EVENTS_TRIGGERED[EGU_ACTIVATE_IDX]) {
+        EGU_SELECT->EVENTS_TRIGGERED[EGU_ACTIVATE_IDX] = 0;
+        volatile uint16_t sample = COUNTER_SELECT->CC[COUNTER_CC_SAMPLE_CAPTURE];
+        int ret = k_msgq_put(&_samples_msgq, (void*)&sample, K_NO_WAIT);
+        LOG_WRN_IF(ret, "msgq full");
+        (void)k_work_submit(&_sample_process_work);
+    }
+}
 
 static void _sample_process(struct k_work *work) {
     static uint16_t value_filtered = 0;
@@ -405,43 +398,34 @@ static void _sample_process(struct k_work *work) {
         static const uint8_t scale_factor = _FIXED8_PERCENT(40);
         value_filtered = (value_filtered*scale_factor + sample*(UINT8_MAX - scale_factor) + 128) >> 8;
 
-        /* map value to something approximately proportional with capacitance, and range 0 to 127 */
-        // TODO: precalculate constants
-        static const int32_t a = _FIXED8_PERCENT(50);
-        const int32_t A = _counter_region.nominal * RTC_TICKS_SAMPLE_HF * a / RTC_TICKS_SAMPLE >> 8;
-        const int32_t Sp = _counter_region.activate * RTC_TICKS_SAMPLE_HF / RTC_TICKS_SAMPLE;
-        const int32_t Sn = _counter_region.saturate * RTC_TICKS_SAMPLE_HF / RTC_TICKS_SAMPLE;
-        const int32_t sample_clamp = CLAMP(value_filtered, (uint16_t)Sn, (uint16_t)Sp);
-
-        const int32_t denominator = (Sp - Sn)*(sample_clamp + A - Sn);
-        if (denominator == 0) {
-            LOG_WRN("denominator 0");
-            continue;
-        }
-        const int16_t value_transformed = 127*A*(Sp - sample_clamp)/denominator;
-
-        uint16_t data[] = {sample, value_filtered, value_transformed};
-
-        bt_log_notify((uint8_t*)data, sizeof(data));
-
-        // _sample_store[_sample_store_idx] = (struct _sample_store){sample, value_filtered};
-        // _sample_store_idx++;
-        // if (_sample_store_idx == NUM_SAMPLES_STORE) {
-        //     // send
-        //     for (int i = 0; i < NUM_SAMPLES_STORE; i++) {
-        //         LOG_INF("capd: %d-%d", _sample_store[i].sample, _sample_store[i].filtered);
-        //     }
-        //     _sample_store_idx = 0;
-        // }
-
-        // LOG_INF("S: %d, S_c: %d, V: %d, V_o: %d [%d:%d:%d]", sample, sample_clamp, value, value_filtered, _counter_region.nominal, _counter_region.activate, _counter_region.saturate);
     }
 
-    // if (value_filtered == 0)
-    //     _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY);
+    /* map value to something approximately proportional with capacitance, and range 0 to 127 */
+    // TODO: precalculate constants
+    static const int32_t a = _FIXED8_PERCENT(50);
+    const int32_t A = _counter_region.nominal * RTC_TICKS_SAMPLE_HF * a / RTC_TICKS_SAMPLE >> 8;
+    const int32_t Sp = _counter_region.activate * RTC_TICKS_SAMPLE_HF / RTC_TICKS_SAMPLE;
+    const int32_t Sn = _counter_region.saturate * RTC_TICKS_SAMPLE_HF / RTC_TICKS_SAMPLE;
+    const int32_t sample_clamp = CLAMP(value_filtered, (uint16_t)Sn, (uint16_t)Sp);
 
-    // static uint8_t output_prev = 0;
-    // if (output_prev == value_filtered) return;
-    // output_prev = value_filtered;
-    // _cb(value_filtered);
+    const int32_t denominator = (Sp - Sn)*(sample_clamp + A - Sn);
+    if (denominator == 0) {
+        LOG_WRN("denominator 0");
+        return;
+    }
+    const uint16_t value_transformed = 127*A*(Sp - sample_clamp)/denominator;
+
+#if CONFIG_DEBUG
+    uint16_t data[] = {sample, value_filtered, value_transformed};
+    bt_log_notify((uint8_t*)data, sizeof(data));
+#endif
+
+    // keep in high power mode by uncommenting the rest of this
+    if (value_transformed == 0)
+        _set_state(_STATE_AUTONOMOUS_LOW_FREQUENCY);
+
+    static uint8_t output_prev = 0;
+    if (output_prev == value_transformed) return;
+    output_prev = value_transformed;
+    _cb(value_transformed);
 }

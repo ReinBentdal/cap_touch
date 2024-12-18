@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Web Bluetooth Example</title>
+<title>Web Bluetooth Logger</title>
 <style>
   body {
     font-family: sans-serif;
@@ -23,7 +23,7 @@
 </style>
 </head>
 <body>
-<h1>Simple Web Bluetooth App</h1>
+<h1>Simple Web Bluetooth Logger</h1>
 <button id="connectButton">Connect</button>
 <button id="toggleNotificationsButton" disabled>Start Notifications</button>
 <button id="clearButton">Clear</button>
@@ -32,7 +32,7 @@
 <div id="log"></div>
 
 <script>
-  // UUIDs from your definition
+  // random UUIDs as also used by the logging device
   const SERVICE_UUID = '03b80e5a-ffff-4b33-a751-6ce34ec4c700';
   const CHARACTERISTIC_UUID = '03b80e5a-ffff-ffff-a751-6ce34ec4c700';
 
@@ -96,12 +96,12 @@
       const byteValue = value.getUint8(i);
       bytes.push(byteValue.toString(16).padStart(2, '0'));
     }
-    // Join by space and log
     log(bytes.join(' '));
   }
 
   clearButton.addEventListener('click', () => {
     logElement.textContent = '';
+    cnt = 0
   });
 
   let cnt = 0;

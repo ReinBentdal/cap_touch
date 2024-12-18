@@ -3,7 +3,6 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(cap_touch)
 
-# root directories from where we might include headers
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 target_sources(app PRIVATE src/main.c)
