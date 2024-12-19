@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include <nrf.h>
 
-// in this sample, everything is assumed to be on a single common GPIO
+// in this sample, everything is assumed to be on a single common GPIO port
 #define PORT_COMMON NRF_P0
 
 // select which LED to use
