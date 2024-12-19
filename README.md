@@ -14,3 +14,5 @@ Compile with:
 - desired log method, from `overlays/` as overlay (if debug)
 
 Make sure to configure `hardware_spec.h` to your specific setup
+
+All measurements and corresponding analysis in `analysis/` directory.
