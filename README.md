@@ -11,6 +11,6 @@ in `prj.conf`
 Compile with:
 - `prj.conf`
 - `debug.conf` or `debug.conf` as overlay
-- desired log method, from `overlays/` as overlay
+- desired log method, from `overlays/` as overlay (if debug)
 
 Make sure to configure `hardware_spec.h` to your specific setup
