@@ -16,3 +16,5 @@ Compile with:
 Make sure to configure `hardware_spec.h` to your specific setup
 
 All measurements and corresponding analysis in `analysis/` directory.
+
+The system is tested using nRF52832.
